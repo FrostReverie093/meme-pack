@@ -1,11 +1,20 @@
 const GITHUB_REPO = "FrostReverie093/meme-pack";
+
+// GitHub proxy mirrors for file downloads
+// Format: replace "https://github.com/" with this prefix
+const PROXY_MIRRORS = [
+  "https://ghfile.geekertao.top/",
+  "https://gh.geekertao.top/",
+  "https://github.dpik.top/",
+  "https://gh.felicity.ac.cn/",
+];
+
 const CACHE_TTL = 600; // 10 minutes
 
 async function handleRequest(request) {
   const url = new URL(request.url);
   const path = url.pathname;
 
-  // CORS headers
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -16,31 +25,31 @@ async function handleRequest(request) {
     return new Response(null, { headers: { ...corsHeaders } });
   }
 
-  // API routes
+  // Root — info page
   if (path === "/" || path === "/index.html") {
     return new Response(JSON.stringify({
       name: "meme-pack Resource Pack API",
       version: "1.0.0",
       endpoints: {
-        latest: "/api/latest",
-        all_releases: "/api/releases",
+        latest: "/api/latest",       // returns the raw file (direct download)
+        json: "/api/latest/json",    // returns JSON metadata
       },
-      description: "Get the latest resource pack download link from GitHub Releases",
+      description: "Direct file proxy from GitHub Releases",
     }, null, 2), {
-      headers: {
-        "Content-Type": "application/json",
-        ...corsHeaders,
-      },
+      headers: { "Content-Type": "application/json", ...corsHeaders },
     });
   }
 
+  // --- Raw file endpoint (returns the actual file) ---
   if (path === "/api/latest") {
-    // Return only the latest release download link
     try {
-      const cache = caches.default;
-      const cachedResponse = await cache.match(request.url);
-      if (cachedResponse) {
-        return new Response(cachedResponse.body, {
+      // Check cache first
+      const cacheKey = await caches.open("meme-pack-files");
+      const cached = await cacheKey.match(request.url);
+      if (cached) {
+        return new Response(cached.body, {
+          status: cached.status,
+          statusText: cached.statusText,
           headers: {
             ...corsHeaders,
             "X-Cache": "HIT",
@@ -48,45 +57,59 @@ async function handleRequest(request) {
         });
       }
 
-      const githubRes = await fetch(
+      // Fetch latest release metadata from GitHub API
+      const apiRes = await fetch(
         `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
-        {
-          headers: { "Accept": "application/vnd.github.v3+json" },
-        }
+        { headers: { "Accept": "application/vnd.github.v3+json" } }
       );
 
-      if (!githubRes.ok) {
-        throw new Error(`GitHub API error: ${githubRes.status}`);
+      if (!apiRes.ok) {
+        throw new Error(`GitHub API error: ${apiRes.status}`);
       }
 
-      const release = await githubRes.json();
+      const release = await apiRes.json();
       const asset = release.assets?.[0];
 
       if (!asset) {
         throw new Error("No assets found in latest release");
       }
 
-      const responseData = {
-        name: asset.name,
-        downloadUrl: asset.browser_download_url,
-        size: asset.size,
-        createdAt: release.created_at,
-        publishedAt: release.published_at,
-        tag: release.tag_name,
-        prerelease: release.prerelease,
-      };
+      // Try each mirror in order
+      let fileRes = null;
+      let usedMirror = "";
 
-      const body = JSON.stringify(responseData);
-      const response = new Response(body, {
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders,
-          "Cache-Control": `public, max-age=${CACHE_TTL}`,
-        },
+      for (const mirror of PROXY_MIRRORS) {
+        const downloadUrl = mirror + asset.browser_download_url.replace(
+          "https://github.com/", ""
+        );
+
+        fileRes = await fetch(downloadUrl, {
+          headers: { "User-Agent": "meme-pack-api-proxy" },
+        });
+
+        if (fileRes.ok) {
+          usedMirror = mirror;
+          break;
+        }
+      }
+
+      if (!fileRes || !fileRes.ok) {
+        throw new Error(`File download failed on all mirrors (last status: ${fileRes?.status || "N/A"})`);
+      }
+
+      const headers = new Headers(fileRes.headers);
+      headers.set("Content-Disposition", `attachment; filename="${asset.name}"`);
+      headers.set("Content-Type", fileRes.headers.get("Content-Type") || "application/octet-stream");
+      headers.set("Cache-Control", `public, max-age=${CACHE_TTL}`);
+      headers.set("X-Mirror", usedMirror);
+      Object.assign(headers, corsHeaders);
+
+      const response = new Response(fileRes.body, {
+        status: fileRes.status,
+        headers,
       });
 
-      // Store in cache
-      const cacheKey = await caches.open("meme-pack-api");
+      // Cache the file body
       await cacheKey.put(request.url, response.clone());
 
       return response;
@@ -98,50 +121,48 @@ async function handleRequest(request) {
     }
   }
 
-  if (path === "/api/releases") {
-    // Return all releases
+  // --- JSON metadata endpoint ---
+  if (path === "/api/latest/json") {
     try {
       const cache = caches.default;
-      const cachedResponse = await cache.match(request.url);
-      if (cachedResponse) {
-        return new Response(cachedResponse.body, {
-          headers: {
-            ...corsHeaders,
-            "X-Cache": "HIT",
-          },
+      const cached = await cache.match(request.url);
+      if (cached) {
+        return new Response(await cached.text(), {
+          headers: { "Content-Type": "application/json", ...corsHeaders, "X-Cache": "HIT" },
         });
       }
 
-      const githubRes = await fetch(
-        `https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100`,
-        {
-          headers: { "Accept": "application/vnd.github.v3+json" },
-        }
+      const res = await fetch(
+        `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
+        { headers: { "Accept": "application/vnd.github.v3+json" } }
       );
 
-      if (!githubRes.ok) {
-        throw new Error(`GitHub API error: ${githubRes.status}`);
-      }
+      if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
 
-      const releases = await githubRes.json();
-      const formatted = releases.map((r) => ({
-        tag: r.tag_name,
-        name: r.assets?.[0]?.name || "unknown",
-        downloadUrl: r.assets?.[0]?.browser_download_url || "",
-        size: r.assets?.[0]?.size || 0,
-        createdAt: r.created_at,
-        publishedAt: r.published_at,
-        prerelease: r.prerelease,
-        draft: r.draft,
+      const release = await res.json();
+      const asset = release.assets?.[0];
+
+      if (!asset) throw new Error("No assets found");
+
+      // Build proxied download URLs for all mirrors
+      const proxyUrls = PROXY_MIRRORS.map((mirror) => ({
+        mirror,
+        url: mirror + asset.browser_download_url.replace("https://github.com/", ""),
       }));
 
-      const body = JSON.stringify(formatted, null, 2);
+      const body = JSON.stringify({
+        name: asset.name,
+        downloadUrl: asset.browser_download_url,
+        proxyUrls,
+        size: asset.size,
+        createdAt: release.created_at,
+        publishedAt: release.published_at,
+        tag: release.tag_name,
+        prerelease: release.prerelease,
+      }, null, 2);
+
       const response = new Response(body, {
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders,
-          "Cache-Control": `public, max-age=${CACHE_TTL}`,
-        },
+        headers: { "Content-Type": "application/json", ...corsHeaders, "Cache-Control": `public, max-age=${CACHE_TTL}` },
       });
 
       const cacheKey = await caches.open("meme-pack-api");
