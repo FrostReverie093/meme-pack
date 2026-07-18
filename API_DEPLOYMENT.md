@@ -4,11 +4,11 @@
 
 ## API 端点
 
-| 端点 | 说明 |
-|------|------|
-| `/` | 首页，列出所有可用端点 |
-| `/api/latest` | **直接返回文件**（浏览器访问即下载最新 Release 的第一个资产） |
-| `/api/latest/json` | 返回 JSON 元数据（包含所有镜像源直链） |
+| 端点               | 说明                                                          |
+| ------------------ | ------------------------------------------------------------- |
+| `/`                | 首页，列出所有可用端点                                        |
+| `/api/latest`      | **直接返回文件**（浏览器访问即下载最新 Release 的第一个资产） |
+| `/api/latest/json` | 返回 JSON 元数据（包含所有镜像源直链）                        |
 
 ### 使用示例
 
@@ -48,7 +48,7 @@ GET https://your-worker.workers.dev/api/latest/json
 4. 进入编辑模式，粘贴 `worker.js` 的全部内容
 5. 确认第一行 `GITHUB_REPO` 是你自己的仓库名
 6. 点击 **Deploy**
-7. 访问 `https://your-project.workers.dev/api/latest` 测试
+7. 访问 `https://meme-pack-api.zhangjinyu0418.workers.dev/api/latest` 测试
 
 ### 方法二：Wrangler CLI
 

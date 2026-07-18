@@ -1,5 +1,7 @@
-node_compat = false
-workers_dev = true
-compatibility_date = "2024-01-01"
-main = "worker.js"
-format = "modules"
+{
+  "name": "meme-pack-api",
+  "version": "1.0.0",
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
